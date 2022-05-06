@@ -14,6 +14,8 @@ else
   cb_config_dir=/var/lib/letsencrypt
 fi
 
+[ -f config.env ] && source config.env
+
 dashes='------------------------------------------------------------'
 equals='============================================================'
 help () {
@@ -84,7 +86,7 @@ check_wgd_status(){
 }
 
 certbot_create_ssl () {
-  certbot certonly --config ./certbot.ini --email "$EMAIL" --work-dir $cb_work_dir --config-dir $cb_config_dir --domain "$SERVERURL"
+  certbot certonly --config ./certbot.ini --email "$EMAIL" --work-dir $cb_work_dir --config-dir $cb_config_dir --domain "$SERVER_URL"
 }
 
 certbot_renew_ssl () {
@@ -92,6 +94,15 @@ certbot_renew_ssl () {
 }
 
 gunicorn_start () {
+  if [[ $SSL == true ]]; then
+    if [ ! -d $cb_config_dir ]; then
+      echo "Creating SSL certificate"
+      certbot_create_ssl
+    else
+      echo "Renewing SSL certificate"
+      certbot_renew_ssl
+    fi
+  fi
   printf "%s\n" "$dashes"
   printf "| Starting WGDashboard with Gunicorn in the background.    |\n"
   if [ ! -d "log" ]; then
@@ -101,8 +112,17 @@ gunicorn_start () {
   if [[ $USER == root ]]; then
     export PATH=$PATH:/usr/local/bin:$HOME/.local/bin
   fi
-  gunicorn --access-logfile log/access_"$d".log \
-  --error-logfile log/error_"$d".log 'dashboard:run_dashboard()'
+  if [[ $SSL == true ]]; then
+    echo "Starting gunicorn with SSL certificate"
+    gunicorn --certfile $cb_config_dir/live/"$SERVER_URL"/cert.pem \
+      --keyfile $cb_config_dir/live/"$SERVER_URL"/privkey.pem \
+      --access-logfile log/access_"$d".log \
+      --error-logfile log/error_"$d".log 'dashboard:run_dashboard()'
+  else
+    echo "Starting gunicorn without SSL certificate"
+    gunicorn --access-logfile log/access_"$d".log \
+      --error-logfile log/error_"$d".log 'dashboard:run_dashboard()'
+  fi
   printf "| Log files is under log/                                  |\n"
   printf "%s\n" "$dashes"
 }
